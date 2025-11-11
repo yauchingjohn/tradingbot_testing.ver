@@ -35,6 +35,7 @@ END_DATE = datetime(2025, 11, 26, 23, 59)   # force exit
 def get_usd_free():
     bal = get_balance()
     if not bal or "SpotWallet" not in bal:
+        logging.warning("get_balance() failed or no SpotWallet")
         return 0.0
     spot = bal["SpotWallet"]
     usd = spot.get("USD", {})
@@ -42,6 +43,7 @@ def get_usd_free():
     try:
         return float(free)
     except (ValueError, TypeError):
+        logging.warning(f"Invalid USD Free value: {free}")
         return 0.0
 
 def is_uptrend(pair):
