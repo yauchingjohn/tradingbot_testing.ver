@@ -12,7 +12,6 @@ PAIRS = [
     "BNB/USD", "BTC/USD", "EOS/USD", "ETC/USD",
     "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD", "ASTER/USD"
 ]
-POLL_MINUTES = 1     #Poll interval
 RISK_PERCENT = 25    #Risk per trade
 RR_MIN = 2.5
 
@@ -142,8 +141,18 @@ def decision():
                     continue
 
                 sl = zone_low * 0.995
-                tp = max(highs[pair][-3:]) if highs[pair] else price * 1.05
-                if rr_valid(price, sl, tp):
+               
+                # --- SMART TP: Guarantee R:R >= 2.5 ---
+                risk = price - sl
+                min_tp = price + (risk * RR_MIN)  # Minimum for 2.5:1
+
+                if highs[pair] and len(highs[pair]) >= 3:
+                    swing_tp = max(highs[pair][-3:])
+                    tp = max(swing_tp, min_tp)
+                else:
+                    tp = min_tp
+
+                if tp > price and (tp - price) / risk >= RR_MIN:
                     candidates.append((pair, price, sl, tp, zone))
 
             if candidates:
