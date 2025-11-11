@@ -141,19 +141,8 @@ def decision():
                     continue
 
                 sl = zone_low * 0.995
-               
-                # --- SMART TP: Guarantee R:R >= 2.5 ---
-                risk = price - sl
-                min_tp = price + (risk * RR_MIN)  # Minimum for 2.5:1
-
-                if highs[pair] and len(highs[pair]) >= 3:
-                    swing_tp = max(highs[pair][-3:])
-                    tp = max(swing_tp, min_tp)
-                else:
-                    tp = min_tp
-
-                if tp > price and (tp - price) / risk >= RR_MIN:
-                    candidates.append((pair, price, sl, tp, zone))
+                tp = max(highs[pair][-3:]) if highs[pair] else price * 1.05
+                if rr_valid(price, sl, tp):
 
             if candidates:
                 # Pick first valid (you can add scoring later)
