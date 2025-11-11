@@ -13,8 +13,8 @@ PAIRS = [
     "BNB/USD", "BTC/USD", "EOS/USD", "ETC/USD",
     "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD", "ASTER/USD"
 ]
-POLL_MINUTES = 1
-RISK_PERCENT = 25
+POLL_MINUTES = 1     #Poll interval
+RISK_PERCENT = 25    #Risk per trade
 RR_MIN = 2.5
 
 # ---------- Logging ----------
