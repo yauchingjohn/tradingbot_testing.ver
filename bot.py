@@ -144,12 +144,25 @@ def decision():
     except Exception as e:
         logging.error(f"EXCEPTION: {e}")
 
-# ---------- Scheduler ----------
-schedule.every(POLL_MINUTES).minutes.do(decision)
+# ---------- SYNCED LOOP: Run at :00 of every minute ----------
 
 logging.info("=== PURE PRICE ACTION BOT STARTED (Uptrend + Demand + R:R 2.5) ===")
-logging.info(f"Monitoring: {', '.join(PAIRS)} | 1-min polling")
+logging.info(f"Monitoring: {', '.join(PAIRS)} | 1-min candlestick sync")
+
+# Run once immediately (for startup)
 decision()
+
+# Sync to the next :00
+now = datetime.now()
+seconds_to_next = 60 - now.second
+if seconds_to_next < 60:
+    logging.info(f"Syncing... next run in {seconds_to_next} seconds")
+    time.sleep(seconds_to_next)
+
+# Now run exactly at :00 every minute
 while True:
-    schedule.run_pending()
-    time.sleep(1)
+    start_time = datetime.now()
+    decision()
+    elapsed = (datetime.now() - start_time).total_seconds()
+    sleep_time = max(0, 60 - elapsed)  # Avoid drift
+    time.sleep(sleep_time)
