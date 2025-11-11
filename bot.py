@@ -8,6 +8,15 @@ from api import get_ticker, get_balance, place_order
 from config import PAIRS, POLL_MINUTES, RISK_PERCENT, RR_MIN
 import json
 
+# ---------- CONFIGURATION  ----------
+PAIRS = [
+    "BNB/USD", "BTC/USD", "EOS/USD", "ETC/USD",
+    "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD", "ASTER/USD"
+]
+POLL_MINUTES = 1
+RISK_PERCENT = 25
+RR_MIN = 2.5
+
 # ---------- Logging ----------
 logging.basicConfig(
     filename="bot.log",
