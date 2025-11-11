@@ -3,7 +3,7 @@ import time
 import logging
 from datetime import datetime
 import schedule
-from api import get_price, get_balance, place_market_order
+from api import get_ticker, get_balance, place_order
 from config import PAIR, POLL_MINUTES, RISK_PERCENT
 
 logging.basicConfig(
