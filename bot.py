@@ -143,6 +143,7 @@ def decision():
                 sl = zone_low * 0.995
                 tp = max(highs[pair][-3:]) if highs[pair] else price * 1.05
                 if rr_valid(price, sl, tp):
+                    candidates.append((pair, price, sl, tp, zone))
 
             if candidates:
                 # Pick first valid (you can add scoring later)
