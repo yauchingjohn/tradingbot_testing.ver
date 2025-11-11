@@ -93,6 +93,7 @@ def decision():
     global HELD_PAIR, POS_QTY
 
     try:
+        logging.info("Decision loop started")
         now = datetime.now()
         if now >= END_DATE and HELD_PAIR:
             price = get_ticker(HELD_PAIR)["Data"][HELD_PAIR]["LastPrice"]
@@ -157,6 +158,7 @@ def decision():
                 logging.info(f"BUY {qty} {pair} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f} | ZONE:{zone} → {json.dumps(resp)}")
                 if resp.get("Status") == "FILLED":
                     HELD_PAIR, POS_QTY = pair, qty
+        logging.info("Decision loop ended")
 
     except Exception as e:
         logging.error(f"EXCEPTION: {e}")
