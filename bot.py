@@ -103,13 +103,16 @@ def decision():
             return
 
         usd_free = get_usd_free()
+        logging.info(f"USD free: {usd_free:.2f}")
         if usd_free < 10:
+            logging.warning("Low USD balance - skipping")
             return
 
         # Update price & swings
         for pair in PAIRS:
             ticker = get_ticker(pair)
             if not ticker or pair not in ticker.get("Data", {}):
+                logging.warning(f"Failed to fetch ticker for {pair}")
                 continue
             price = float(ticker["Data"][pair]["LastPrice"])
             price_history[pair].append(price)
