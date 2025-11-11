@@ -34,7 +34,15 @@ END_DATE = datetime(2025, 11, 26, 23, 59)   # force exit
 # ---------- Helpers ----------
 def get_usd_free():
     bal = get_balance()
-    return float(bal.get("USD", {}).get("Free", "0")) if bal else 0.0
+    if not bal or "SpotWallet" not in bal:
+        return 0.0
+    spot = bal["SpotWallet"]
+    usd = spot.get("USD", {})
+    free = usd.get("Free", "0")
+    try:
+        return float(free)
+    except (ValueError, TypeError):
+        return 0.0
 
 def is_uptrend(pair):
     """True if last low broke previous high → valid uptrend"""
