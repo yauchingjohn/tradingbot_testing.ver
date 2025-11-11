@@ -1,73 +1,154 @@
-# bot.py
+# bot.py - Pure Price Action: Market Structure + Demand Zones
 import time
 import logging
-from datetime import datetime
 import schedule
+from datetime import datetime
+from collections import deque
 from api import get_ticker, get_balance, place_order
-from config import PAIR, POLL_MINUTES, RISK_PERCENT
+from config import PAIRS, POLL_MINUTES, RISK_PERCENT, RR_MIN
+import json
 
+# ---------- Logging ----------
 logging.basicConfig(
     filename="bot.log",
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
 
-price_history = []
-POSITION = 0.0
+# ---------- Global State ----------
+price_history = {p: deque(maxlen=200) for p in PAIRS}   # keep last 200 mins
+highs = {p: [] for p in PAIRS}          # list of swing highs
+lows  = {p: [] for p in PAIRS}          # list of swing lows
+demand_zones = {p: [] for p in PAIRS}   # list of (low, high) tuples
+HELD_PAIR = None
+POS_QTY = 0.0
+END_DATE = datetime(2025, 11, 25, 23, 59)   # force exit
 
-def calculate_sma(series, period):
-    return sum(series[-period:]) / period if len(series) >= period else None
+# ---------- Helpers ----------
+def get_usd_free():
+    bal = get_balance()
+    return float(bal.get("USD", {}).get("Free", "0")) if bal else 0.0
+
+def is_uptrend(pair):
+    """True if last low broke previous high → valid uptrend"""
+    if len(lows[pair]) < 2 or len(highs[pair]) < 2:
+        return False
+    last_low = lows[pair][-1]
+    prev_high = highs[pair][-2] if len(highs[pair]) >= 2 else 0
+    return last_low < prev_high  # low broke previous high
+
+def detect_swing_points(pair):
+    """Detect swing highs/lows (simplified)"""
+    prices = list(price_history[pair])
+    if len(prices) < 5:
+        return
+    mid = prices[-3]
+    left, right = prices[-5:-3], prices[-2:]
+    if all(mid > x for x in left) and all(mid > x for x in right):
+        highs[pair].append(mid)
+        if len(highs[pair]) > 10:
+            highs[pair] = highs[pair][-10:]
+    if all(mid < x for x in left) and all(mid < x for x in right):
+        lows[pair].append(mid)
+        if len(lows[pair]) > 10:
+            lows[pair] = lows[pair][-10:]
+
+def find_demand_zone(pair):
+    """Find latest demand zone: consolidation → strong upward impulse"""
+    prices = list(price_history[pair])
+    if len(prices) < 20:
+        return None
+    for i in range(len(prices)-15, len(prices)-5):
+        window = prices[i-10:i]
+        if max(window) - min(window) < (max(prices[i:]) - prices[i]) * 0.3:  # tight range
+            impulse = prices[i+5] - prices[i] if i+5 < len(prices) else 0
+            if impulse > 0:
+                zone_low = min(window)
+                zone_high = max(window)
+                return (zone_low, zone_high)
+    return None
+
+def rr_valid(entry, sl, tp):
+    """Risk-to-Reward ≥ 2.5:1"""
+    risk = entry - sl
+    reward = tp - entry
+    return reward / risk >= RR_MIN if risk > 0 else False
+
+# ---------- Core Decision ----------
 def decision():
-    global POSITION, price_history
+    global HELD_PAIR, POS_QTY
+
     try:
-        # Use new get_ticker
-        ticker_data = get_ticker(PAIR)
-        if not ticker_data or "Data" not in ticker_data:
-            logging.error("Failed to get ticker")
-            return
-        price = float(ticker_data["Data"][PAIR]["LastPrice"])
-        price_history.append(price)
-        if len(price_history) > 30:
-            price_history = price_history[-30:]
-
-        logging.info(f"Price {PAIR}: {price}")
-
-        if len(price_history) < 15:
-            logging.info("Waiting for more data...")
+        now = datetime.now()
+        if now >= END_DATE and HELD_PAIR:
+            price = get_ticker(HELD_PAIR)["Data"][HELD_PAIR]["LastPrice"]
+            resp = place_order(HELD_PAIR, "SELL", POS_QTY)
+            logging.info(f"FINAL SELL {POS_QTY} {HELD_PAIR} @ {price:.2f} → {json.dumps(resp)}")
+            if resp.get("Status") == "FILLED":
+                HELD_PAIR, POS_QTY = None, 0.0
             return
 
-        sma5 = calculate_sma(price_history, 5)
-        sma15 = calculate_sma(price_history, 15)
-        logging.info(f"SMA5={sma5:.2f}  SMA15={sma15:.2f}")
-
-        # Use new get_balance
-        balance = get_balance()
-        if not balance:
-            logging.error("Failed to get balance")
+        usd_free = get_usd_free()
+        if usd_free < 10:
             return
-        usd_free = float(balance.get("USD", {}).get("Free", "0"))
-        btc_free = float(balance.get("BTC", {}).get("Free", "0"))
 
-        if sma5 > sma15 and POSITION == 0 and usd_free > 10:
-            risk_usd = usd_free * (RISK_PERCENT / 100)
-            qty = round(risk_usd / price, 6)
-            resp = place_order(PAIR, "BUY", qty)  # MARKET by default
-            logging.info(f"BUY {qty} BTC → {resp}")
-            if resp and resp.get("Status") == "FILLED":
-                POSITION = qty
+        # Update price & swings
+        for pair in PAIRS:
+            ticker = get_ticker(pair)
+            if not ticker or pair not in ticker.get("Data", {}):
+                continue
+            price = float(ticker["Data"][pair]["LastPrice"])
+            price_history[pair].append(price)
+            logging.info(f"Price {pair}: {price:.2f}")
+            detect_swing_points(pair)
 
-        elif sma5 < sma15 and POSITION > 0:
-            resp = place_order(PAIR, "SELL", POSITION)
-            logging.info(f"SELL {POSITION} BTC → {resp}")
-            if resp and resp.get("Status") == "FILLED":
-                POSITION = 0.0
+        # SELL: if held and price breaks valid low
+        if HELD_PAIR and HELD_PAIR in price_history:
+            if lows[HELD_PAIR] and price_history[HELD_PAIR][-1] < lows[HELD_PAIR][-1]:
+                price = price_history[HELD_PAIR][-1]
+                resp = place_order(HELD_PAIR, "SELL", POS_QTY)
+                logging.info(f"STRUCTURE BREAK SELL {POS_QTY} {HELD_PAIR} @ {price:.2f} → {json.dumps(resp)}")
+                if resp.get("Status") == "FILLED":
+                    HELD_PAIR, POS_QTY = None, 0.0
+                return
+
+        # BUY: only in uptrend + demand zone + R:R ≥ 2.5
+        if not HELD_PAIR:
+            candidates = []
+            for pair in PAIRS:
+                if not is_uptrend(pair):
+                    continue
+                zone = find_demand_zone(pair)
+                if not zone:
+                    continue
+                zone_low, zone_high = zone
+                price = price_history[pair][-1]
+                if not (zone_low <= price <= zone_high):
+                    continue
+
+                sl = zone_low * 0.995
+                tp = max(highs[pair][-3:]) if highs[pair] else price * 1.05
+                if rr_valid(price, sl, tp):
+                    candidates.append((pair, price, sl, tp, zone))
+
+            if candidates:
+                # Pick first valid (you can add scoring later)
+                pair, entry, sl, tp, zone = candidates[0]
+                risk_usd = usd_free * (RISK_PERCENT / 100)
+                qty = round(risk_usd / entry, 6)
+                resp = place_order(pair, "BUY", qty)
+                logging.info(f"BUY {qty} {pair} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f} | ZONE:{zone} → {json.dumps(resp)}")
+                if resp.get("Status") == "FILLED":
+                    HELD_PAIR, POS_QTY = pair, qty
 
     except Exception as e:
-        logging.error(f"ERROR in decision: {e}")
-        
+        logging.error(f"EXCEPTION: {e}")
+
+# ---------- Scheduler ----------
 schedule.every(POLL_MINUTES).minutes.do(decision)
 
-logging.info("BOT STARTED")
+logging.info("=== PURE PRICE ACTION BOT STARTED (Uptrend + Demand + R:R 2.5) ===")
+logging.info(f"Monitoring: {', '.join(PAIRS)} | 1-min polling")
 decision()
 while True:
     schedule.run_pending()
