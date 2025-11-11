@@ -1,11 +1,10 @@
 # bot.py - Pure Price Action: Market Structure + Demand Zones
 import time
 import logging
-import schedule
 from datetime import datetime
 from collections import deque
 from api import get_ticker, get_balance, place_order
-from config import PAIRS, POLL_MINUTES, RISK_PERCENT, RR_MIN
+from config import API_KEY, SECRET_KEY
 import json
 
 # ---------- CONFIGURATION  ----------
@@ -31,7 +30,7 @@ lows  = {p: [] for p in PAIRS}          # list of swing lows
 demand_zones = {p: [] for p in PAIRS}   # list of (low, high) tuples
 HELD_PAIR = None
 POS_QTY = 0.0
-END_DATE = datetime(2025, 11, 25, 23, 59)   # force exit
+END_DATE = datetime(2025, 11, 26, 23, 59)   # force exit
 
 # ---------- Helpers ----------
 def get_usd_free():
@@ -64,19 +63,26 @@ def detect_swing_points(pair):
 
 def find_demand_zone(pair):
     """Find latest demand zone: consolidation → strong upward impulse"""
+    global demand_zones
     prices = list(price_history[pair])
     if len(prices) < 20:
         return None
     for i in range(len(prices)-15, len(prices)-5):
         window = prices[i-10:i]
-        if max(window) - min(window) < (max(prices[i:]) - prices[i]) * 0.3:  # tight range
+        if max(window) - min(window) < (max(prices[i:]) - prices[i]) * 0.3:
             impulse = prices[i+5] - prices[i] if i+5 < len(prices) else 0
             if impulse > 0:
                 zone_low = min(window)
                 zone_high = max(window)
-                return (zone_low, zone_high)
+                zone = (zone_low, zone_high)
+                # Store latest zone
+                if pair not in demand_zones:
+                    demand_zones[pair] = []
+                demand_zones[pair].append(zone)
+                if len(demand_zones[pair]) > 5:
+                    demand_zones[pair] = demand_zones[pair][-5:]
+                return zone
     return None
-
 def rr_valid(entry, sl, tp):
     """Risk-to-Reward ≥ 2.5:1"""
     risk = entry - sl
