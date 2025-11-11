@@ -1,138 +1,74 @@
-# bot.py - Roostoo AI Trading Bot (SMA Crossover)
-# Team: [Your Team Name] | HKU Web3 Hackathon
-
-import requests
+# bot.py
 import time
-import hmac
-import hashlib
-import urllib.parse
-from collections import deque
 import logging
-import os
-
-# ========================= CONFIG =========================
-API_KEY = os.getenv('API_KEY', 'YOUR_ROOSTOO_API_KEY_HERE')
-SECRET_KEY = os.getenv('SECRET_KEY', 'YOUR_ROOSTOO_SECRET_KEY_HERE')
-BASE_URL = 'https://mock-api.roostoo.com/v3'
-PAIR = 'BTC/USD'
-SHORT_WINDOW = 5
-LONG_WINDOW = 15
-QUANTITY = '0.001'  # BTC per trade (adjust)
-RISK_PERCENT = 0.02  # 2% risk per trade
-POLL_INTERVAL = 300  # 5 minutes
-
-# Data
-price_history = deque(maxlen=LONG_WINDOW * 2)
-# =========================================================
+from datetime import datetime
+import schedule
+from api import get_price, get_balance, place_market_order
+from config import PAIR, POLL_MINUTES, RISK_PERCENT
 
 logging.basicConfig(
-    filename='trading_bot.log',
+    filename="bot.log",
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s'
+    format="%(asctime)s %(levelname)s %(message)s",
 )
 
-def get_timestamp():
-    return str(int(time.time() * 1000))
+price_history = []
+POSITION = 0.0
 
-def sign_payload(payload):
-    param_str = '&'.join([f"{k}={urllib.parse.quote(str(v), safe='')}" 
-                          for k, v in sorted(payload.items())])
-    return hmac.new(SECRET_KEY.encode(), param_str.encode(), hashlib.sha256).hexdigest()
+def calculate_sma(series, period):
+    return sum(series[-period:]) / period if len(series) >= period else None
+def decision():
+    global POSITION, price_history
+    try:
+        # Use new get_ticker
+        ticker_data = get_ticker(PAIR)
+        if not ticker_data or "Data" not in ticker_data:
+            logging.error("Failed to get ticker")
+            return
+        price = float(ticker_data["Data"][PAIR]["LastPrice"])
+        price_history.append(price)
+        if len(price_history) > 30:
+            price_history = price_history[-30:]
 
-def api_request(endpoint, method='GET', params=None):
-    if params is None:
-        params = {}
-    params['timestamp'] = get_timestamp()
-    
-    if method == 'POST':
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'RST-API-KEY': API_KEY,
-            'MSG-SIGNATURE': sign_payload(params)
-        }
-        body = urllib.parse.urlencode(params)
-        url = BASE_URL + endpoint
-        response = requests.post(url, headers=headers, data=body)
-    else:
-        query = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
-        headers = {
-            'RST-API-KEY': API_KEY,
-            'MSG-SIGNATURE': sign_payload(params)
-        }
-        url = f"{BASE_URL}{endpoint}?{query}"
-        response = requests.get(url, headers=headers)
-    
-    logging.info(f"API {method} {endpoint} → {response.status_code}")
-    return response.json() if response.ok else None
+        logging.info(f"Price {PAIR}: {price}")
 
-def get_price():
-    data = api_request('/ticker', params={'pair': PAIR})
-    if data and data.get('Success'):
-        return float(data['Data'][PAIR]['LastPrice'])
-    return None
+        if len(price_history) < 15:
+            logging.info("Waiting for more data...")
+            return
 
-def get_balance():
-    return api_request('/balance')
+        sma5 = calculate_sma(price_history, 5)
+        sma15 = calculate_sma(price_history, 15)
+        logging.info(f"SMA5={sma5:.2f}  SMA15={sma15:.2f}")
 
-def place_order(side, quantity=QUANTITY):
-    params = {
-        'pair': PAIR,
-        'side': side.upper(),
-        'type': 'MARKET',
-        'quantity': quantity
-    }
-    return api_request('/place_order', method='POST', params=params)
+        # Use new get_balance
+        balance = get_balance()
+        if not balance:
+            logging.error("Failed to get balance")
+            return
+        usd_free = float(balance.get("USD", {}).get("Free", "0"))
+        btc_free = float(balance.get("BTC", {}).get("Free", "0"))
 
-def has_position():
-    balance = get_balance()
-    if balance and balance.get('Success'):
-        coin = PAIR.split('/')[0]
-        return float(balance['Wallet'].get(coin, {}).get('Free', 0)) > 0
-    return False
+        if sma5 > sma15 and POSITION == 0 and usd_free > 10:
+            risk_usd = usd_free * (RISK_PERCENT / 100)
+            qty = round(risk_usd / price, 6)
+            resp = place_order(PAIR, "BUY", qty)  # MARKET by default
+            logging.info(f"BUY {qty} BTC → {resp}")
+            if resp and resp.get("Status") == "FILLED":
+                POSITION = qty
 
-def sma(prices, window):
-    if len(prices) < window:
-        return None
-    return sum(prices[-window:]) / window
+        elif sma5 < sma15 and POSITION > 0:
+            resp = place_order(PAIR, "SELL", POSITION)
+            logging.info(f"SELL {POSITION} BTC → {resp}")
+            if resp and resp.get("Status") == "FILLED":
+                POSITION = 0.0
 
-# ========================= MAIN LOOP =========================
-def main():
-    logging.info("BOT STARTED")
-    print("Bot started. Check trading_bot.log")
+    except Exception as e:
+        logging.error(f"ERROR in decision: {e}")
+        
+schedule.every(POLL_MINUTES).minutes.do(decision)
 
-    while True:
-        try:
-            price = get_price()
-            if price:
-                price_history.append(price)
-                logging.info(f"Price: {price}")
-
-            if len(price_history) >= LONG_WINDOW:
-                short = sma(price_history, SHORT_WINDOW)
-                long = sma(price_history, LONG_WINDOW)
-
-                if short and long:
-                    in_position = has_position()
-
-                    if short > long and not in_position:
-                        bal = get_balance()
-                        if bal:
-                            usd = float(bal['Wallet']['USD']['Free'])
-                            risk_qty = usd * RISK_PERCENT / price
-                            qty = min(float(QUANTITY), risk_qty)
-                            if qty > 0:
-                                result = place_order('BUY', str(qty))
-                                logging.info(f"BUY {qty} BTC → {result}")
-
-                    elif short < long and in_position:
-                        result = place_order('SELL')
-                        logging.info(f"SELL → {result}")
-
-            time.sleep(POLL_INTERVAL)
-
-        except Exception as e:
-            logging.error(f"ERROR: {e}")
-            time.sleep(60)
-
-if __name__ == "__main__":
-    main()
+logging.info("BOT STARTED")
+decision()
+while True:
+    schedule.run_pending()
+    time.sleep(1)
