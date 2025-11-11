@@ -10,7 +10,7 @@ import json
 # ---------- CONFIGURATION  ----------
 PAIRS = [
     "BNB/USD", "BTC/USD", "EOS/USD", "ETC/USD",
-    "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD", "ASTER/USD"
+    "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD"
 ]
 RISK_PERCENT = 25    #Risk per trade
 RR_MIN = 2.5
@@ -122,10 +122,14 @@ def decision():
         # Update price & swings
         for pair in PAIRS:
             ticker = get_ticker(pair)
-            if not ticker or pair not in ticker.get("Data", {}):
-                logging.warning(f"Failed to fetch ticker for {pair}")
+            if not ticker:
+                logging.warning(f"get_ticker({pair}) returned None")
                 continue
-            price = float(ticker["Data"][pair]["LastPrice"])
+            data = ticker.get("Data", {})
+            if pair not in data:
+                logging.warning(f"Pair {pair} not in Data: {list(data.keys())}")
+                continue
+            price = float(data[pair]["LastPrice"])
             price_history[pair].append(price)
             logging.info(f"Price {pair}: {price:.2f}")
             detect_swing_points(pair)
