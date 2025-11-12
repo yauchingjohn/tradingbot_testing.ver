@@ -10,7 +10,7 @@ import json
 # ---------- CONFIGURATION  ----------
 PAIRS = [
     "BNB/USD", "BTC/USD", "EOS/USD", "ETC/USD",
-    "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD"
+    "ETH/USD", "BAT/USD", "LINK/USD", "SOL/USD", "ASTER/USD"
 ]
 RISK_PERCENT = 25    #Risk per trade
 RR_MIN = 2.5
@@ -121,18 +121,22 @@ def decision():
 
         # Update price & swings
         for pair in PAIRS:
-            ticker = get_ticker(pair)
-            if not ticker:
-                logging.warning(f"get_ticker({pair}) returned None")
+            try:
+                ticker = get_ticker(pair)
+                if not ticker:
+                    logging.warning(f"get_ticker({pair}) returned None")
+                    continue
+                data = ticker.get("Data", {})
+                if pair not in data:
+                    logging.warning(f"Pair {pair} not in Data: {list(data.keys())}")
+                    continue
+                price = float(data[pair]["LastPrice"])
+                price_history[pair].append(price)
+                logging.info(f"Price {pair}: {price:.2f}")
+                detect_swing_points(pair)
+            except Exception as e:
+                logging.error(f"ERROR on {pair}: {e}")
                 continue
-            data = ticker.get("Data", {})
-            if pair not in data:
-                logging.warning(f"Pair {pair} not in Data: {list(data.keys())}")
-                continue
-            price = float(data[pair]["LastPrice"])
-            price_history[pair].append(price)
-            logging.info(f"Price {pair}: {price:.2f}")
-            detect_swing_points(pair)
 
         # SELL: if held and price breaks valid low
         if HELD_PAIR and HELD_PAIR in price_history:
