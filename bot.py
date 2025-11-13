@@ -163,7 +163,13 @@ def decision():
                     continue
 
                 sl = zone_low * 0.995
-                tp = max(highs[pair][-3:]) if highs[pair] else price * 1.05
+                # Updated TP without empty max error
+                recent_highs = highs[pair][-3:]
+                if recent_highs:
+                    tp = max(recent_highs)
+                else:
+                    tp = price * 1.05
+                    logging.info(f"No recent highs for {pair}, using 5% TP")
                 if rr_valid(price, sl, tp):
                     candidates.append((pair, price, sl, tp, zone))
 
