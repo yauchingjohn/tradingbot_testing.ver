@@ -1,17 +1,26 @@
-# tradingbot_testing.ver
-testing version of crypto trading bot
-# Roostoo Trading Bot – SMA Crossover
+## Description
+1. Trading Bot running on Roostoo for a 2-week competition.
+2. The strategy is built mainly based on observing **market structure** and **buying pressure** in different price level.
 
-**Strategy**: 5/15 SMA crossover on BTC/USD  
-**Risk**: 2% per trade  
-**Polling**: Every 5 minutes  
+## Data Sources
+1. Bot data feeding from coingecko's historical data
+2. Real-time market data from Roostoo (getting the closing price of every 1-min candlestick)
 
-## Run on AWS
+## Strategy Overview
+1. Detect **swing highs/lows**
+2. Wait for uptrend confirmation (Higher Highs + Higher Lows)
+3. Finding **demand zones** with strong buying pressure
 
-```bash
-git clone https://github.com/yourusername/roostoo-trading-bot.git
-cd roostoo-trading-bot
-pip install -r requirements.txt
-export API_KEY="your_key"
-export SECRET_KEY="your_secret"
-nohup python3 bot.py &
+## Entry Rules
+1. Only enter long positions
+2. Only enter trades when the following three **buying signals** are satisfied **simultaneously**:
+   1. Uptrend is confirmed and not broken
+   2. Price retest on the demand zone
+   3. Risk-Return Ratio must be greater than 2.5:1 (i.e. (TP - Entry price) / (Entry price - SL) >= 2.5
+## Exit Rules
+1. Stop loss (SL) = Lowest point of demand zone - 14-day max price diff (similar concept with 14-day ATR)
+2. Target Profit (TP) = Max Recent Highs
+   
+## Risk Management
+1. Size of each position: 25% of **remaining** capital
+2. Buy spot only
